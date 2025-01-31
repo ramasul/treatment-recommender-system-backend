@@ -4,14 +4,17 @@ from shared.utils import *
 from dotenv import load_dotenv
 import os
 
-# Load environment variables from the .env file
+# Preprocess
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# Access the variables
-my_value = os.getenv('GROQ_API_KEY')
+my_value = os.getenv('LLM_MODEL_CONFIG_groq_llama3_70b')
 
 print(f'MY_VARIABLE: {my_value}')
 
 result = get_documents_from_file_by_path("D:\KerjaPraktik\Backend\datatest.csv", "datatest.csv")
 print(result)
-#get_documents_from_Wikipedia('https://en.wikipedia.org/wiki/Python_(programming_language)', 'en')
+
+print("===================================== WIKIPEDIA SCRAPING ======================================")
+wiki_result = get_documents_from_Wikipedia('Diabetes', 'id')
+print(wiki_result)
