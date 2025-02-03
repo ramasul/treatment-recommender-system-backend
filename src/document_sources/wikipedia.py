@@ -1,6 +1,6 @@
 import logging
 from langchain_community.document_loaders import WikipediaLoader
-from shared.llm_graph_builder_exception import LLMGraphBuilderException
+from src.shared.llm_graph_builder_exception import LLMGraphBuilderException
 
 def get_documents_from_Wikipedia(wiki_query:str, language:str):
   try:

@@ -63,6 +63,8 @@ def close_db_connection(graph, api_name):
 
 
 def get_chunk_and_graphDocument(graph_document_list, chunkId_chunkDoc_list):
+  """[ENG]: Create a list of chunks and graph documents.
+  [IDN]: Membuat daftar chunk dan dokumen graf."""
   logging.info("Creating list of chunks and graph documents in get_chunk_and_graphDocument func")
   lst_chunk_chunkId_document=[]
   for graph_document in graph_document_list:            
@@ -85,6 +87,18 @@ def load_embedding_model(embedding_model_name: str):
     return embeddings, dimension
 
 def handle_backticks_nodes_relationship_id_type(graph_document_list:List[GraphDocument]):
+    """[ENG]: Cleans node and relationship identifiers by removing backticks and ensuring 
+    that only valid nodes and relationships with non-empty identifiers and types are retained.
+    
+    [IDN]: Membersihkan identifier node dan relationship dengan menghapus backtick serta memastikan 
+    hanya node dan relationship yang valid dan tidak kosong dengan identifier dan tipenya yang dipertahankan.
+    
+    Args:
+        graph_document_list (List[GraphDocument]): A list of graph documents containing nodes 
+        and relationships.
+
+    Returns:
+        List[GraphDocument]: The cleaned list of graph documents with updated nodes and relationships."""
     for graph_document in graph_document_list:
       # Clean node id and types 
       cleaned_nodes = []

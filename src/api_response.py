@@ -1,7 +1,8 @@
 def create_api_response(status,success_count=None,failed_count=None, data=None, error=None,message=None,file_source=None,file_name=None):
     """
-    Create a response to be sent to the API. This is a helper function to create a JSON response that can be sent to the API.
-    
+    [ENG]: Create a response to be sent to the API. This is a helper function to create a JSON response that can be sent to the API.
+    [IDN]: Membuat respons yang akan dikirim ke API. Fungsi ini sebuah helper untuk membuat respon JSON yang dapat dikirim ke API.
+
     Args:
         status: The status of the API call. Should be one of the constants in this module.
         data: The data that was returned by the API call.

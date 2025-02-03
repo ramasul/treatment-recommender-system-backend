@@ -5,12 +5,16 @@ from langchain_unstructured import UnstructuredLoader
 from langchain_core.documents import Document
 
 def load_document_content(file_path):
+    """[ENG]: Load the content of the document based on the file extension.
+    [IDN]: Memuat dokumen berdasarkan ekstensi filenya."""
     if Path(file_path).suffix.lower() == '.pdf':
         return PyMuPDFLoader(file_path)
     else:
         return UnstructuredLoader(file_path, mode="elements", autodetect_encoding=True)
     
 def get_documents_from_file_by_path(file_path,file_name):
+    """[ENG]: Retrieve the documents from the specified file path.
+    [IDN]: Mendapatkan dokumen dari path filenya."""
     file_path = Path(file_path)
     if file_path.exists():
         logging.info(f'file {file_name} processing')        
@@ -30,6 +34,8 @@ def get_documents_from_file_by_path(file_path,file_name):
     return file_name, pages , file_extension
 
 def get_pages_with_page_numbers(unstructured_pages):
+    """[ENG]: Retrieve the pages with page numbers.
+    [IDN]: Mendapatkan isi halaman dan nomor halamannya."""
     pages = []
     page_number = 1
     page_content=''
