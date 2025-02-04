@@ -20,32 +20,32 @@ def last_url_segment(url):
   last_url_segment = path.split("/")[-1] if path else parsed_url.netloc.split(".")[0]
   return last_url_segment
 
-# def check_url_source(source_type, yt_url:str=None, wiki_query:str=None):
-#     language=''
-#     try:
-#       logging.info(f"incoming URL: {yt_url}")
-#       if  source_type == 'Wikipedia':
-#         wiki_query_id=''
-#         wikipedia_url_regex = r'https?:\/\/(www\.)?([a-zA-Z]{2,3})\.wikipedia\.org\/wiki\/(.*)'
-#         wiki_id_pattern = r'^[a-zA-Z0-9 _\-\.\,\:\(\)\[\]\{\}\/]*$'
+def check_url_source(source_type, yt_url:str=None, wiki_query:str=None):
+    language=''
+    try:
+      logging.info(f"incoming URL: {yt_url}")
+      if  source_type == 'Wikipedia':
+        wiki_query_id=''
+        wikipedia_url_regex = r'https?:\/\/(www\.)?([a-zA-Z]{2,3})\.wikipedia\.org\/wiki\/(.*)'
+        wiki_id_pattern = r'^[a-zA-Z0-9 _\-\.\,\:\(\)\[\]\{\}\/]*$'
         
-#         match = re.search(wikipedia_url_regex, wiki_query.strip())
-#         if match:
-#                 language = match.group(2)
-#                 wiki_query_id = match.group(3)
+        match = re.search(wikipedia_url_regex, wiki_query.strip())
+        if match:
+                language = match.group(2)
+                wiki_query_id = match.group(3)
 
-#         else:
-#             raise Exception(f'Not a valid wikipedia url: {wiki_query} ')
+        else:
+            raise Exception(f'Not a valid wikipedia url: {wiki_query} ')
 
-#         logging.info(f"wikipedia query id = {wiki_query_id}")     
-#         return wiki_query_id, language     
-#     except Exception as e:
-#       logging.error(f"Error in recognize URL: {e}")
-#       raise Exception(e)
+        logging.info(f"wikipedia query id = {wiki_query_id}")     
+        return wiki_query_id, language     
+    except Exception as e:
+      logging.error(f"Error in recognize URL: {e}")
+      raise Exception(e)
 
 #Fungsi yang berkaitan dengan database
 def create_graph_database_connection(uri, userName, password, database):
-  enable_user_agent = os.getenv("ENABLE_USER_AGENT", "False").lower() in ("true", "1", "yes")
+  enable_user_agent = os.environ.get("ENABLE_USER_AGENT", "False").lower() in ("true", "1", "yes")
   if enable_user_agent:
     graph = Neo4jGraph(url=uri, database=database, username=userName, password=password, refresh_schema=False, sanitize=True,driver_config={'user_agent':os.getenv('NEO4J_USER_AGENT')})  
   else:
