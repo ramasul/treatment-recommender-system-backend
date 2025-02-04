@@ -1,12 +1,12 @@
 from document_sources.wikipedia import *
 from document_sources.local_file import get_documents_from_file_by_path
-from shared.utils import *
+from src.shared.utils import *
 from dotenv import load_dotenv
 import os
 
 # Preprocess
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.basicConfig(format='%(asctime)s - %(message)s',level='INFO')
 
 my_value = os.getenv('LLM_MODEL_CONFIG_groq_llama3_70b')
 
