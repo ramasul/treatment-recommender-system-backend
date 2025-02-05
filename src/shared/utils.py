@@ -13,6 +13,10 @@ def formatted_time(current_time):
   formatted_time = current_time.strftime('%Y-%m-%d %H:%M:%S %Z')
   return str(formatted_time)
 
+def time_to_seconds(time_str):
+    h, m, s = map(int, time_str.split(':'))
+    return h * 3600 + m * 60 + s
+
 #Fungsi yang berkaitan dengan URL
 def last_url_segment(url):
   parsed_url = urlparse(url)
