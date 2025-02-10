@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import hashlib
 from typing import List
 from pathlib import Path
 from urllib.parse import urlparse
@@ -129,4 +130,9 @@ def delete_uploaded_local_file(merged_file_path, file_name):
     file_path.unlink()
     logging.info(f'file {file_name} deleted successfully')
 
-
+#Extras
+def create_gcs_bucket_folder_name_hashed(uri, file_name):
+  folder_name = uri + file_name
+  folder_name_sha1 = hashlib.sha1(folder_name.encode())
+  folder_name_sha1_hashed = folder_name_sha1.hexdigest()
+  return folder_name_sha1_hashed
