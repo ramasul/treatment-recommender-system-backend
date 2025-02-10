@@ -14,6 +14,29 @@ EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL')
 EMBEDDING_FUNCTION , EMBEDDING_DIMENSION = load_embedding_model(EMBEDDING_MODEL)
 
 def merge_relationship_between_chunk_and_entities(graph: Neo4jGraph, graph_documents_chunk_chunk_Id: list):
+    """[ENG]: 
+    Creates HAS_ENTITY relationships between document chunks and entities in a Neo4j graph.
+
+    This function iterates through a list of document chunk objects, extracts entity nodes 
+    from each document, and constructs relationships between chunks and entities. 
+    The relationships are then batch-inserted into the Neo4j database using APOC procedures.
+
+    [IDN]: 
+    Membuat relasi  HAS_ENTITY antara chunk dokumen dan entitas dalam graf Neo4j.
+
+    Fungsi ini mengiterasi daftar objek chunk dokumen, mengekstrak node entitas 
+    dari setiap dokumen, dan membuat hubungan antara potongan dokumen dan entitas. 
+    Hubungan tersebut kemudian dimasukkan ke dalam database Neo4j secara batch.
+
+    Args:
+        graph (Neo4jGraph): The Neo4j graph instance used for executing queries.
+        graph_documents_chunk_chunk_Id (list): A list of dictionaries, where each dictionary 
+            contains:
+            - 'chunk_id' (str): The unique identifier of the chunk.
+            - 'graph_doc' (object): An object containing entity nodes.
+    
+    """
+
     batch_data = []
     logging.info(f"Create HAS_ENTITY relationship between chunk and entities")
 
