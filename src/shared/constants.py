@@ -160,6 +160,149 @@ SKIP $skip
 LIMIT $limit
 """
 
+### NODE AND RELATIONSHIP
+NODEREL_COUNT_QUERY_WITH_COMMUNITY = """
+MATCH (d:Document)
+WHERE d.fileName IS NOT NULL
+OPTIONAL MATCH (d)<-[po:PART_OF]-(c:Chunk)
+OPTIONAL MATCH (c)-[he:HAS_ENTITY]->(e:__Entity__)
+OPTIONAL MATCH (c)-[sim:SIMILAR]->(c2:Chunk)
+OPTIONAL MATCH (c)-[nc:NEXT_CHUNK]->(c3:Chunk)
+OPTIONAL MATCH (e)-[ic:IN_COMMUNITY]->(comm:__Community__)
+OPTIONAL MATCH (comm)-[pc1:PARENT_COMMUNITY]->(first_level:__Community__)
+OPTIONAL MATCH (first_level)-[pc2:PARENT_COMMUNITY]->(second_level:__Community__)
+OPTIONAL MATCH (second_level)-[pc3:PARENT_COMMUNITY]->(third_level:__Community__)
+WITH
+  d.fileName AS filename,
+  count(DISTINCT c) AS chunkNodeCount,
+  count(DISTINCT po) AS partOfRelCount,
+  count(DISTINCT he) AS hasEntityRelCount,
+  count(DISTINCT sim) AS similarRelCount,
+  count(DISTINCT nc) AS nextChunkRelCount,
+  count(DISTINCT e) AS entityNodeCount,
+  collect(DISTINCT e) AS entities,
+  count(DISTINCT comm) AS baseCommunityCount,
+  count(DISTINCT first_level) AS firstlevelcommCount,
+  count(DISTINCT second_level) AS secondlevelcommCount,
+  count(DISTINCT third_level) AS thirdlevelcommCount,
+  count(DISTINCT ic) AS inCommunityCount,
+  count(DISTINCT pc1) AS parentCommunityRelCount1,
+  count(DISTINCT pc2) AS parentCommunityRelCount2,
+  count(DISTINCT pc3) AS parentCommunityRelCount3
+WITH
+  filename,
+  chunkNodeCount,
+  partOfRelCount + hasEntityRelCount + similarRelCount + nextChunkRelCount AS chunkRelCount,
+  entityNodeCount,
+  entities,
+  baseCommunityCount + firstlevelcommCount + secondlevelcommCount + thirdlevelcommCount AS commCount,
+  inCommunityCount + parentCommunityRelCount1 + parentCommunityRelCount2 + parentCommunityRelCount3 AS communityRelCount
+CALL (entities) {
+  UNWIND entities AS e
+  RETURN sum(COUNT { (e)-->(e2:__Entity__) WHERE e2 in entities }) AS entityEntityRelCount
+}
+RETURN
+  filename,
+  COALESCE(chunkNodeCount, 0) AS chunkNodeCount,
+  COALESCE(chunkRelCount, 0) AS chunkRelCount,
+  COALESCE(entityNodeCount, 0) AS entityNodeCount,
+  COALESCE(entityEntityRelCount, 0) AS entityEntityRelCount,
+  COALESCE(commCount, 0) AS communityNodeCount,
+  COALESCE(communityRelCount, 0) AS communityRelCount
+"""
+
+NODEREL_COUNT_QUERY_WITHOUT_COMMUNITY = """
+MATCH (d:Document)
+WHERE d.fileName = $document_name
+OPTIONAL MATCH (d)<-[po:PART_OF]-(c:Chunk)
+OPTIONAL MATCH (c)-[he:HAS_ENTITY]->(e:__Entity__)
+OPTIONAL MATCH (c)-[sim:SIMILAR]->(c2:Chunk)
+OPTIONAL MATCH (c)-[nc:NEXT_CHUNK]->(c3:Chunk)
+WITH
+  d.fileName AS filename,
+  count(DISTINCT c) AS chunkNodeCount,
+  count(DISTINCT po) AS partOfRelCount,
+  count(DISTINCT he) AS hasEntityRelCount,
+  count(DISTINCT sim) AS similarRelCount,
+  count(DISTINCT nc) AS nextChunkRelCount,
+  count(DISTINCT e) AS entityNodeCount,
+  collect(DISTINCT e) AS entities
+WITH
+  filename,
+  chunkNodeCount,
+  partOfRelCount + hasEntityRelCount + similarRelCount + nextChunkRelCount AS chunkRelCount,
+  entityNodeCount,
+  entities
+CALL (entities) {
+  UNWIND entities AS e
+  RETURN sum(COUNT { (e)-->(e2:__Entity__) WHERE e2 in entities }) AS entityEntityRelCount
+}
+RETURN
+  filename,
+  COALESCE(chunkNodeCount, 0) AS chunkNodeCount,
+  COALESCE(chunkRelCount, 0) AS chunkRelCount,
+  COALESCE(entityNodeCount, 0) AS entityNodeCount,
+  COALESCE(entityEntityRelCount, 0) AS entityEntityRelCount
+"""
+
+## CHAT SETUP
+CHAT_MAX_TOKENS = 1000
+CHAT_SEARCH_KWARG_SCORE_THRESHOLD = 0.5
+CHAT_DOC_SPLIT_SIZE = 3000
+CHAT_EMBEDDING_FILTER_SCORE_THRESHOLD = 0.10
+
+CHAT_TOKEN_CUT_OFF = {
+     ('openai_gpt_3.5','azure_ai_gpt_35',"gemini_1.0_pro","gemini_1.5_pro", "gemini_1.5_flash","groq-llama3",'groq_llama3_70b','anthropic_claude_3_5_sonnet','fireworks_llama_v3_70b','bedrock_claude_3_5_sonnet', ) : 4, 
+     ("openai-gpt-4","diffbot" ,'azure_ai_gpt_4o',"openai_gpt_4o", "openai_gpt_4o_mini") : 28,
+     ("ollama_llama3") : 2  
+}  
+
+### CHAT TEMPLATES 
+CHAT_SYSTEM_TEMPLATE = """
+You are an AI-powered question-answering agent. Your task is to provide accurate and comprehensive responses to user queries based on the given context, chat history, and available resources.
+
+### Response Guidelines:
+1. **Direct Answers**: Provide clear and thorough answers to the user's queries without headers unless requested. Avoid speculative responses.
+2. **Utilize History and Context**: Leverage relevant information from previous interactions, the current user input, and the context provided below.
+3. **No Greetings in Follow-ups**: Start with a greeting in initial interactions. Avoid greetings in subsequent responses unless there's a significant break or the chat restarts.
+4. **Admit Unknowns**: Clearly state if an answer is unknown. Avoid making unsupported statements.
+5. **Avoid Hallucination**: Only provide information based on the context provided. Do not invent information.
+6. **Response Length**: Keep responses concise and relevant. Aim for clarity and completeness within 4-5 sentences unless more detail is requested.
+7. **Tone and Style**: Maintain a professional and informative tone. Be friendly and approachable.
+8. **Error Handling**: If a query is ambiguous or unclear, ask for clarification rather than providing a potentially incorrect answer.
+9. **Fallback Options**: If the required information is not available in the provided context, provide a polite and helpful response. Example: "I don't have that information right now." or "I'm sorry, but I don't have that information. Is there something else I can help with?"
+10. **Context Availability**: If the context is empty, do not provide answers based solely on internal knowledge. Instead, respond appropriately by indicating the lack of information.
+
+
+**IMPORTANT** : DO NOT ANSWER FROM YOUR KNOWLEDGE BASE USE THE BELOW CONTEXT
+
+### Context:
+<context>
+{context}
+</context>
+
+### Example Responses:
+User: Hi 
+AI Response: 'Hello there! How can I assist you today?'
+
+User: "What is Langchain?"
+AI Response: "Langchain is a framework that enables the development of applications powered by large language models, such as chatbots. It simplifies the integration of language models into various applications by providing useful tools and components."
+
+User: "Can you explain how to use memory management in Langchain?"
+AI Response: "Langchain's memory management involves utilizing built-in mechanisms to manage conversational context effectively. It ensures that the conversation remains coherent and relevant by maintaining the history of interactions and using it to inform responses."
+
+User: "I need help with PyCaret's classification model."
+AI Response: "PyCaret simplifies the process of building and deploying machine learning models. For classification tasks, you can use PyCaret's setup function to prepare your data. After setup, you can compare multiple models to find the best one, and then fine-tune it for better performance."
+
+User: "What can you tell me about the latest realtime trends in AI?"
+AI Response: "I don't have that information right now. Is there something else I can help with?"
+
+Note: This system does not generate answers based solely on internal knowledge. It answers from the information provided in the user's current and previous inputs, and from the context.
+"""
+
+QUESTION_TRANSFORM_TEMPLATE = "Given the below conversation, generate a search query to look up in order to get information relevant to the conversation. Only respond with the query, nothing else." 
+
+
 ### Vector graph search 
 VECTOR_SEARCH_TOP_K = 5
 
@@ -583,4 +726,106 @@ CHAT_MODE_CONFIG_MAP= {
     }
 
 YOUTUBE_CHUNK_SIZE_SECONDS = 60
+
+QUERY_TO_GET_CHUNKS = """
+            MATCH (d:Document)
+            WHERE d.fileName = $filename
+            WITH d
+            OPTIONAL MATCH (d)<-[:PART_OF|FIRST_CHUNK]-(c:Chunk)
+            RETURN c.id as id, c.text as text, c.position as position 
+            """
+            
+QUERY_TO_DELETE_EXISTING_ENTITIES = """
+                                MATCH (d:Document {fileName:$filename})
+                                WITH d
+                                MATCH (d)<-[:PART_OF]-(c:Chunk)
+                                WITH d,c
+                                MATCH (c)-[:HAS_ENTITY]->(e)
+                                WHERE NOT EXISTS { (e)<-[:HAS_ENTITY]-()<-[:PART_OF]-(d2:Document) }
+                                DETACH DELETE e
+                                """   
+
+QUERY_TO_GET_LAST_PROCESSED_CHUNK_POSITION="""
+                              MATCH (d:Document)
+                              WHERE d.fileName = $filename
+                              WITH d
+                              MATCH (c:Chunk) WHERE c.embedding is null 
+                              RETURN c.id as id,c.position as position 
+                              ORDER BY c.position LIMIT 1
+                              """   
+QUERY_TO_GET_LAST_PROCESSED_CHUNK_WITHOUT_ENTITY = """
+                              MATCH (d:Document)
+                              WHERE d.fileName = $filename
+                              WITH d
+                              MATCH (d)<-[:PART_OF]-(c:Chunk) WHERE NOT exists {(c)-[:HAS_ENTITY]->()}
+                              RETURN c.id as id,c.position as position 
+                              ORDER BY c.position LIMIT 1
+                              """
+QUERY_TO_GET_NODES_AND_RELATIONS_OF_A_DOCUMENT = """
+                              MATCH (d:Document)<-[:PART_OF]-(:Chunk)-[:HAS_ENTITY]->(e) where d.fileName=$filename
+                              OPTIONAL MATCH (d)<-[:PART_OF]-(:Chunk)-[:HAS_ENTITY]->(e2:!Chunk)-[rel]-(e)
+                              RETURN count(DISTINCT e) as nodes, count(DISTINCT rel) as rels
+                              """                              
+
+START_FROM_BEGINNING  = "start_from_beginning"     
+DELETE_ENTITIES_AND_START_FROM_BEGINNING = "delete_entities_and_start_from_beginning"
+START_FROM_LAST_PROCESSED_POSITION = "start_from_last_processed_position"                                                    
+
+GRAPH_CLEANUP_PROMPT = """
+You are tasked with organizing a list of types into semantic categories based on their meanings, including synonyms or morphological similarities. The input will include two separate lists: one for **Node Labels** and one for **Relationship Types**. Follow these rules strictly:
+### 1. Input Format
+The input will include two keys:
+- `nodes`: A list of node labels.
+- `relationships`: A list of relationship types.
+### 2. Grouping Rules
+- Group similar items into **semantic categories** based on their meaning or morphological similarities.
+- The name of each category must be chosen from the types in the input list (node labels or relationship types). **Do not create or infer new names for categories**.
+- Items that cannot be grouped must remain in their own category.
+### 3. Naming Rules
+- The category name must reflect the grouped items and must be an existing type in the input list.
+- Use a widely applicable type as the category name.
+- **Do not introduce new names or types** under any circumstances.
+### 4. Output Rules
+- Return the output as a JSON object with two keys:
+ - `nodes`: A dictionary where each key represents a category name for nodes, and its value is a list of original node labels in that category.
+ - `relationships`: A dictionary where each key represents a category name for relationships, and its value is a list of original relationship types in that category.
+- Every key and value must come from the provided input lists.
+### 5. Examples
+#### Example 1:
+Input:
+{{
+ "nodes": ["Person", "Human", "People", "Company", "Organization", "Product"],
+ "relationships": ["CREATED_FOR", "CREATED_TO", "CREATED", "PUBLISHED","PUBLISHED_BY", "PUBLISHED_IN", "PUBLISHED_ON"]
+}}
+Output in JSON:
+{{
+ "nodes": {{
+   "Person": ["Person", "Human", "People"],
+   "Organization": ["Company", "Organization"],
+   "Product": ["Product"]
+ }},
+ "relationships": {{
+   "CREATED": ["CREATED_FOR", "CREATED_TO", "CREATED"],
+   "PUBLISHED": ["PUBLISHED_BY", "PUBLISHED_IN", "PUBLISHED_ON"]
+ }}
+}}
+#### Example 2: Avoid redundant or incorrect grouping
+Input:
+{{
+ "nodes": ["Process", "Process_Step", "Step", "Procedure", "Method", "Natural Process", "Step"],
+ "relationships": ["USED_FOR", "USED_BY", "USED_WITH", "USED_IN"]
+}}
+Output:
+{{
+ "nodes": {{
+   "Process": ["Process", "Process_Step", "Step", "Procedure", "Method", "Natural Process"]
+ }},
+ "relationships": {{
+   "USED": ["USED_FOR", "USED_BY", "USED_WITH", "USED_IN"]
+ }}
+}}
+### 6. Key Rule
+If any item cannot be grouped, it must remain in its own category using its original name. Do not repeat values or create incorrect mappings.
+Use these rules to group and name categories accurately without introducing errors or new types.
+"""
 
