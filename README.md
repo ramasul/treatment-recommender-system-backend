@@ -1,12 +1,17 @@
 # Treatment Recommender System Backend
+![Python](https://img.shields.io/badge/Python-yellow)
+![FastAPI](https://img.shields.io/badge/FastAPI-green)
+
 Welcome to the Treatment Recommender System Backend!
 
 This is a project of building a recommender system using LLM integrated with knowledge graph. The knowledge graph is built using file or links, with fixed or non-fixed schema.
 The Knowledge Graph used Leiden Algorithm for Community to enhance efficiency in querying.
 
-The project is made for Industrial Internship Course in Department of Electrical Engineering and Information Technology (DEEIT)
+The project is made for Industrial **Internship** Course in Department of Electrical Engineering and Information Technology (DEEIT)
 
 ## Features
+- **Knowledge Graph Creation**: Transform unstructured data into structured knowledge graphs using LLMs.
+- **Providing Schema**: Provide your own custom schema or use existing schema in settings to generate graph.
 - CRUD operations for nodes and relationships
 - Querying knowledge graph data
 - Integration with Neo4j for graph storage
