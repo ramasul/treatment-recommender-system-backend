@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from langchain_neo4j import Neo4jGraph
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.graphs.graph_document import GraphDocument
+from src.document_sources.youtube import create_youtube_url
 
 #Fungsi yang digunakan secara umum
 def formatted_time(current_time):
@@ -29,8 +30,17 @@ def check_url_source(source_type, yt_url:str=None, wiki_query:str=None):
     language=''
     try:
       logging.info(f"incoming URL: {yt_url}")
-      if  source_type == 'Wikipedia':
+      if source_type == 'youtube':
+        if re.match(r'(?:https?:\/\/)?(?:www\.)?youtu\.?be(?:\.com)?\/?.*(?:watch|embed)?(?:.*v=|v\/|\/)([\w\-_]+)\&?',yt_url.strip()):
+          youtube_url = create_youtube_url(yt_url.strip())
+          logging.info(youtube_url)
+          return youtube_url, language
+        else:
+          raise Exception('Incoming URL is not youtube URL')
+      
+      elif  source_type == 'Wikipedia':
         wiki_query_id=''
+        #pattern = r"https?:\/\/([a-zA-Z0-9\.\,\_\-\/]+)\.wikipedia\.([a-zA-Z]{2,3})\/wiki\/([a-zA-Z0-9\.\,\_\-\/]+)"
         wikipedia_url_regex = r'https?:\/\/(www\.)?([a-zA-Z]{2,3})\.wikipedia\.org\/wiki\/(.*)'
         wiki_id_pattern = r'^[a-zA-Z0-9 _\-\.\,\:\(\)\[\]\{\}\/]*$'
         
@@ -38,7 +48,9 @@ def check_url_source(source_type, yt_url:str=None, wiki_query:str=None):
         if match:
                 language = match.group(2)
                 wiki_query_id = match.group(3)
-
+          # else : 
+          #       languages.append("en")
+          #       wiki_query_ids.append(wiki_url.strip())
         else:
             raise Exception(f'Not a valid wikipedia url: {wiki_query} ')
 
