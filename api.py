@@ -63,6 +63,16 @@ def healthy():
 def sick():
     return False
 
+def decode_password(pwd):
+    sample_string_bytes = base64.b64decode(pwd)
+    decoded_password = sample_string_bytes.decode("utf-8")
+    return decoded_password
+
+def encode_password(pwd):
+    data_bytes = pwd.encode('ascii')
+    encoded_pwd_bytes = base64.b64encode(data_bytes)
+    return encoded_pwd_bytes
+
 class CustomGZipMiddleware:
     """[ENG]: Custom GZip Middleware to compress responses.
     [IDN]: Middleware GZip untuk mengompres respon."""
@@ -115,14 +125,24 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     return """
-    <html>
+    <html lang="en">
         <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>Treatment Recommender System API</title>
             <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+            <script src="https://cdn.tailwindcss.com"></script>
         </head>
-        <body>
-            <h1>Welcome to the Treatment Recommender System Backend</h1>
-            <p>Navigate to <a href="/docs">/docs</a> for the API documentation.</p>
+        <body class="flex items-center justify-center h-screen bg-gray-100">
+            <div class="bg-white shadow-md rounded-lg p-8 text-center">
+                <h1 class="text-2xl font-bold text-gray-800">Welcome to the Treatment Recommender System Backend</h1>
+                <p class="mt-4 text-gray-600">Click the button below to see the API documentation:</p>
+                <a href="/docs">
+                    <button class="mt-4 px-6 py-2 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition duration-200">
+                        View API Docs
+                    </button>
+                </a>
+            </div>
         </body>
     </html>
     """
@@ -313,6 +333,723 @@ async def extract_knowledge_graph_from_file(
     finally:
         gc.collect()
 
+@app.get("/sources_list")
+async def get_source_list(uri:str, userName:str, password:str, email:str, database:str=None):
+    """
+    [ENG]: Calls 'get_source_list_from_graph' which returns list of sources which already exist in databse
+    [IDN]: Memanggil 'get_source_list_from_graph' yang mengembalikan daftar sumber yang sudah ada di dalam database
+    """
+    try:
+        start = time.time()
+        decoded_password = decode_password(password)
+        if " " in uri:
+            uri = uri.replace(" ","+")
+        result = await asyncio.to_thread(get_source_list_from_graph,uri,userName,decoded_password,database)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'sources_list','db_url':uri, 'userName':userName, 'database':database, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response("Success",data=result, message=f"Total elapsed API time {elapsed_time:.2f}")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to fetch source list"
+        error_message = str(e)
+        logging.exception(f'Exception:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+
+@app.post("/post_processing")
+async def post_processing(uri=Form(), userName=Form(), password=Form(), database=Form(), tasks=Form(None), email=Form()):
+    try:
+        graph = create_graph_database_connection(uri, userName, password, database)
+        tasks = set(map(str.strip, json.loads(tasks)))
+        api_name = 'post_processing'
+        count_response = []
+        start = time.time()
+        if "materialize_text_chunk_similarities" in tasks:
+            await asyncio.to_thread(update_graph, graph)
+            api_name = 'post_processing/update_similarity_graph'
+            logging.info(f'Updated KNN Graph')
+
+        if "enable_hybrid_search_and_fulltext_search_in_bloom" in tasks:
+            await asyncio.to_thread(create_vector_fulltext_indexes, uri=uri, username=userName, password=password, database=database)
+            api_name = 'post_processing/enable_hybrid_search_and_fulltext_search_in_bloom'
+            logging.info(f'Full Text index created')
+
+        if os.environ.get('ENTITY_EMBEDDING','False').upper()=="TRUE" and "materialize_entity_similarities" in tasks:
+            await asyncio.to_thread(create_entity_embedding, graph)
+            api_name = 'post_processing/create_entity_embedding'
+            logging.info(f'Entity Embeddings created')
+
+        if "graph_schema_consolidation" in tasks :
+            await asyncio.to_thread(graph_schema_consolidation, graph)
+            api_name = 'post_processing/graph_schema_consolidation'
+            logging.info(f'Updated nodes and relationship labels')
+            
+        if "enable_communities" in tasks:
+            api_name = 'create_communities'
+            await asyncio.to_thread(create_communities, uri, userName, password, database)  
+            
+            logging.info(f'created communities')
+        graph = create_graph_database_connection(uri, userName, password, database)   
+        graphDb_data_Access = graphDBdataAccess(graph)
+        document_name = ""
+        count_response = graphDb_data_Access.update_node_relationship_count(document_name)
+        if count_response:
+            count_response = [{"filename": filename, **counts} for filename, counts in count_response.items()]
+            logging.info(f'Updated source node with community related counts')
+        
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name': api_name, 'db_url': uri, 'userName':userName, 'database':database, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj)
+        return create_api_response('Success', data=count_response, message='All tasks completed successfully')
+    
+    except Exception as e:
+        job_status = "Failed"
+        error_message = str(e)
+        message = f"Unable to complete tasks"
+        logging.exception(f'Exception in post_processing tasks: {error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    
+    finally:
+        gc.collect()
+
+@app.post("/chat_bot")
+async def chat_bot(uri=Form(),model=Form(None),userName=Form(), password=Form(), database=Form(),question=Form(None), document_names=Form(None),session_id=Form(None),mode=Form(None),email=Form()):
+    logging.info(f"QA_RAG called at {datetime.now()}")
+    qa_rag_start_time = time.time()
+    try:
+        if mode == "graph":
+            graph = Neo4jGraph( url=uri,username=userName,password=password,database=database,sanitize = True, refresh_schema=True)
+        else:
+            graph = create_graph_database_connection(uri, userName, password, database)
+        
+        graph_DB_dataAccess = graphDBdataAccess(graph)
+        write_access = graph_DB_dataAccess.check_account_access(database=database)
+        result = await asyncio.to_thread(QA_RAG,graph=graph,model=model,question=question,document_names=document_names,session_id=session_id,mode=mode,write_access=write_access)
+
+        total_call_time = time.time() - qa_rag_start_time
+        logging.info(f"Total Response time is  {total_call_time:.2f} seconds")
+        result["info"]["response_time"] = round(total_call_time, 2)
+        
+        json_obj = {'api_name':'chat_bot','db_url':uri, 'userName':userName, 'database':database, 'question':question,'document_names':document_names,
+                             'session_id':session_id, 'mode':mode, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{total_call_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        
+        return create_api_response('Success',data=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to get chat response"
+        error_message = str(e)
+        logging.exception(f'Exception in chat bot:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message,data=mode)
+    finally:
+        gc.collect()
+
+@app.post("/chunk_entities")
+async def chunk_entities(uri=Form(),userName=Form(), password=Form(), database=Form(), nodedetails=Form(None),entities=Form(),mode=Form(),email=Form()):
+    try:
+        start = time.time()
+        result = await asyncio.to_thread(get_entities_from_chunkids,uri=uri, username=userName, password=password, database=database,nodedetails=nodedetails,entities=entities,mode=mode)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'chunk_entities','db_url':uri, 'userName':userName, 'database':database, 'nodedetails':nodedetails,'entities':entities,
+                            'mode':mode, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result,message=f"Total elapsed API time {elapsed_time:.2f}")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to extract entities from chunk ids"
+        error_message = str(e)
+        logging.exception(f'Exception in chat bot:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+
+@app.post("/get_neighbours")
+async def get_neighbours(uri=Form(),userName=Form(), password=Form(), database=Form(), elementId=Form(None),email=Form()):
+    try:
+        start = time.time()
+        result = await asyncio.to_thread(get_neighbour_nodes,uri=uri, username=userName, password=password,database=database, element_id=elementId)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'get_neighbours', 'userName':userName, 'database':database,'db_url':uri, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result,message=f"Total elapsed API time {elapsed_time:.2f}")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to extract neighbour nodes for given element ID"
+        error_message = str(e)
+        logging.exception(f'Exception in get neighbours :{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+
+@app.post("/graph_query")
+async def graph_query(
+    uri: str = Form(),
+    database: str = Form(),
+    userName: str = Form(),
+    password: str = Form(),
+    document_names: str = Form(None),
+    email=Form()
+):
+    try:
+        start = time.time()
+        result = await asyncio.to_thread(
+            get_graph_results,
+            uri=uri,
+            username=userName,
+            password=password,
+            database=database,
+            document_names=document_names
+        )
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'graph_query','db_url':uri, 'userName':userName, 'database':database, 'document_names':document_names, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success', data=result,message=f"Total elapsed API time {elapsed_time:.2f}")
+    except Exception as e:
+        job_status = "Failed"
+        message = "Unable to get graph query response"
+        error_message = str(e)
+        logging.exception(f'Exception in graph query: {error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect() 
+
+@app.post("/clear_chat_bot")
+async def clear_chat_bot(uri=Form(),userName=Form(), password=Form(), database=Form(), session_id=Form(None),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        result = await asyncio.to_thread(clear_chat_history,graph=graph,session_id=session_id)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'clear_chat_bot', 'db_url':uri, 'userName':userName, 'database':database, 'session_id':session_id, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to clear chat History"
+        error_message = str(e)
+        logging.exception(f'Exception in chat bot:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+            
+@app.post("/connect")
+async def connect(uri=Form(), userName=Form(), password=Form(), database=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        result = await asyncio.to_thread(connection_check_and_get_vector_dimensions, graph, database)
+        gcs_file_cache = os.environ.get('GCS_FILE_CACHE')
+        chunk_to_be_created = int(os.environ.get('CHUNKS_TO_BE_CREATED', '50'))
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'connect','db_url':uri, 'userName':userName, 'database':database, 'count':1, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        result['elapsed_api_time'] = f'{elapsed_time:.2f}'
+        result['gcs_file_cache'] = gcs_file_cache
+        result['chunk_to_be_created']= chunk_to_be_created
+        return create_api_response('Success',data=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Connection failed to connect Neo4j database"
+        error_message = str(e)
+        logging.exception(f'Connection failed to connect Neo4j database:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+
+@app.post("/upload")
+async def upload_large_file_into_chunks(file:UploadFile = File(...), chunkNumber=Form(None), totalChunks=Form(None), 
+                                        originalname=Form(None), model=Form(None), uri=Form(), userName=Form(), 
+                                        password=Form(), database=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        result = await asyncio.to_thread(upload_file, graph, model, file, chunkNumber, totalChunks, originalname, uri, CHUNK_DIR, MERGED_DIR)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'upload','db_url':uri,'userName':userName, 'database':database, 'chunkNumber':chunkNumber,'totalChunks':totalChunks,
+                            'original_file_name':originalname,'model':model, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        if int(chunkNumber) == int(totalChunks):
+            return create_api_response('Success',data=result, message='Source Node Created Successfully')
+        else:
+            return create_api_response('Success', message=result)
+    except Exception as e:
+        message="Unable to upload large file into chunks. "
+        error_message = str(e)
+        logging.info(message)
+        logging.exception(f'Exception:{error_message}')
+        return create_api_response('Failed', message=message + error_message[:100], error=error_message, file_name = originalname)
+    finally:
+        gc.collect()
+            
+@app.post("/schema")
+async def get_structured_schema(uri=Form(), userName=Form(), password=Form(), database=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        result = await asyncio.to_thread(get_labels_and_relationtypes, graph)
+        end = time.time()
+        elapsed_time = end - start
+        logging.info(f'Schema result from DB: {result}')
+        json_obj = {'api_name':'schema','db_url':uri, 'userName':userName, 'database':database, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success', data=result,message=f"Total elapsed API time {elapsed_time:.2f}")
+    except Exception as e:
+        message="Unable to get the labels and relationtypes from neo4j database"
+        error_message = str(e)
+        logging.info(message)
+        logging.exception(f'Exception:{error_message}')
+        return create_api_response("Failed", message=message, error=error_message)
+    finally:
+        gc.collect()
+
+@app.get("/update_extract_status/{file_name}")
+async def update_extract_status(request:Request, file_name, url, userName, password, database):
+    async def generate():
+        status = ''
+        decoded_password = decode_password(password)
+        uri = url
+        if " " in url:
+            uri= url.replace(" ","+")
+        graph = create_graph_database_connection(uri, userName, decoded_password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        while True:
+            try:
+                if await request.is_disconnected():
+                    logging.info(" SSE Client disconnected")
+                    break
+                # get the current status of document node
+                
+                else:
+                    result = graphDb_data_Access.get_current_status_document_node(file_name)
+                    if len(result) > 0:
+                        status = json.dumps({'fileName':file_name, 
+                        'status':result[0]['Status'],
+                        'processingTime':result[0]['processingTime'],
+                        'nodeCount':result[0]['nodeCount'],
+                        'relationshipCount':result[0]['relationshipCount'],
+                        'model':result[0]['model'],
+                        'total_chunks':result[0]['total_chunks'],
+                        'fileSize':result[0]['fileSize'],
+                        'processed_chunk':result[0]['processed_chunk'],
+                        'fileSource':result[0]['fileSource'],
+                        'chunkNodeCount' : result[0]['chunkNodeCount'],
+                        'chunkRelCount' : result[0]['chunkRelCount'],
+                        'entityNodeCount' : result[0]['entityNodeCount'],
+                        'entityEntityRelCount' : result[0]['entityEntityRelCount'],
+                        'communityNodeCount' : result[0]['communityNodeCount'],
+                        'communityRelCount' : result[0]['communityRelCount']
+                        })
+                    yield status
+            except asyncio.CancelledError:
+                logging.info("SSE Connection cancelled")
+    
+    return EventSourceResponse(generate(),ping=60)
+
+@app.post("/delete_document_and_entities")
+async def delete_document_and_entities(uri=Form(), 
+                                       userName=Form(), 
+                                       password=Form(), 
+                                       database=Form(), 
+                                       filenames=Form(),
+                                       source_types=Form(),
+                                       deleteEntities=Form(),
+                                       email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        files_list_size = await asyncio.to_thread(graphDb_data_Access.delete_file_from_graph, filenames, source_types, deleteEntities, MERGED_DIR, uri)
+        message = f"Deleted {files_list_size} documents with entities from database"
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'delete_document_and_entities','db_url':uri, 'userName':userName, 'database':database, 'filenames':filenames,'deleteEntities':deleteEntities,
+                            'source_types':source_types, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',message=message)
+    except Exception as e:
+        job_status = "Failed"
+        message=f"Unable to delete document {filenames}"
+        error_message = str(e)
+        logging.exception(f'{message}:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+
+@app.get('/document_status/{file_name}')
+async def get_document_status(file_name, url, userName, password, database):
+    decoded_password = decode_password(password)
+   
+    try:
+        if " " in url:
+            uri= url.replace(" ","+")
+        else:
+            uri=url
+        graph = create_graph_database_connection(uri, userName, decoded_password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        result = graphDb_data_Access.get_current_status_document_node(file_name)
+        if len(result) > 0:
+            status = {'fileName':file_name, 
+                'status':result[0]['Status'],
+                'processingTime':result[0]['processingTime'],
+                'nodeCount':result[0]['nodeCount'],
+                'relationshipCount':result[0]['relationshipCount'],
+                'model':result[0]['model'],
+                'total_chunks':result[0]['total_chunks'],
+                'fileSize':result[0]['fileSize'],
+                'processed_chunk':result[0]['processed_chunk'],
+                'fileSource':result[0]['fileSource'],
+                'chunkNodeCount' : result[0]['chunkNodeCount'],
+                'chunkRelCount' : result[0]['chunkRelCount'],
+                'entityNodeCount' : result[0]['entityNodeCount'],
+                'entityEntityRelCount' : result[0]['entityEntityRelCount'],
+                'communityNodeCount' : result[0]['communityNodeCount'],
+                'communityRelCount' : result[0]['communityRelCount']
+                }
+        else:
+            status = {'fileName':file_name, 'status':'Failed'}
+        logging.info(f'Result of document status in refresh : {result}')
+        return create_api_response('Success',message="",file_name=status)
+    except Exception as e:
+        message=f"Unable to get the document status"
+        error_message = str(e)
+        logging.exception(f'{message}:{error_message}')
+        return create_api_response('Failed',message=message)
+    
+@app.post("/cancelled_job")
+async def cancelled_job(uri=Form(), userName=Form(), password=Form(), database=Form(), filenames=Form(None), source_types=Form(None),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        result = manually_cancelled_job(graph,filenames, source_types, MERGED_DIR, uri)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'cancelled_job','db_url':uri, 'userName':userName, 'database':database, 'filenames':filenames,
+                            'source_types':source_types, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',message=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to cancelled the running job"
+        error_message = str(e)
+        logging.exception(f'Exception in cancelling the running job:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+
+@app.post("/populate_graph_schema")
+async def populate_graph_schema(input_text=Form(None), model=Form(None), is_schema_description_checked=Form(None),email=Form()):
+    try:
+        start = time.time()
+        result = populate_graph_schema_from_text(input_text, model, is_schema_description_checked)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'populate_graph_schema', 'model':model, 'is_schema_description_checked':is_schema_description_checked, 'input_text':input_text, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to get the schema from text"
+        error_message = str(e)
+        logging.exception(f'Exception in getting the schema from text:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/get_unconnected_nodes_list")
+async def get_unconnected_nodes_list(uri=Form(), userName=Form(), password=Form(), database=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        nodes_list, total_nodes = graphDb_data_Access.list_unconnected_nodes()
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'get_unconnected_nodes_list','db_url':uri, 'userName':userName, 'database':database, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=nodes_list,message=total_nodes)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to get the list of unconnected nodes"
+        error_message = str(e)
+        logging.exception(f'Exception in getting list of unconnected nodes:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/delete_unconnected_nodes")
+async def delete_orphan_nodes(uri=Form(), userName=Form(), password=Form(), database=Form(),unconnected_entities_list=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        result = graphDb_data_Access.delete_unconnected_nodes(unconnected_entities_list)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'delete_unconnected_nodes','db_url':uri, 'userName':userName, 'database':database,'unconnected_entities_list':unconnected_entities_list, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result,message="Unconnected entities delete successfully")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to delete the unconnected nodes"
+        error_message = str(e)
+        logging.exception(f'Exception in delete the unconnected nodes:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/get_duplicate_nodes")
+async def get_duplicate_nodes(uri=Form(), userName=Form(), password=Form(), database=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        nodes_list, total_nodes = graphDb_data_Access.get_duplicate_nodes_list()
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'get_duplicate_nodes','db_url':uri,'userName':userName, 'database':database, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=nodes_list, message=total_nodes)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to get the list of duplicate nodes"
+        error_message = str(e)
+        logging.exception(f'Exception in getting list of duplicate nodes:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/merge_duplicate_nodes")
+async def merge_duplicate_nodes(uri=Form(), userName=Form(), password=Form(), database=Form(),duplicate_nodes_list=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        result = graphDb_data_Access.merge_duplicate_nodes(duplicate_nodes_list)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'merge_duplicate_nodes','db_url':uri, 'userName':userName, 'database':database,
+                            'duplicate_nodes_list':duplicate_nodes_list, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',data=result,message="Duplicate entities merged successfully")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to merge the duplicate nodes"
+        error_message = str(e)
+        logging.exception(f'Exception in merge the duplicate nodes:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/drop_create_vector_index")
+async def drop_create_vector_index(uri=Form(), userName=Form(), password=Form(), database=Form(), isVectorIndexExist=Form(),email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        graphDb_data_Access = graphDBdataAccess(graph)
+        result = graphDb_data_Access.drop_create_vector_index(isVectorIndexExist)
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'drop_create_vector_index', 'db_url':uri, 'userName':userName, 'database':database,
+                            'isVectorIndexExist':isVectorIndexExist, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success',message=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to drop and re-create vector index with correct dimesion as per application configuration"
+        error_message = str(e)
+        logging.exception(f'Exception into drop and re-create vector index with correct dimesion as per application configuration:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()
+        
+@app.post("/retry_processing")
+async def retry_processing(uri=Form(), userName=Form(), password=Form(), database=Form(), file_name=Form(), retry_condition=Form(), email=Form()):
+    try:
+        start = time.time()
+        graph = create_graph_database_connection(uri, userName, password, database)
+        chunks =  graph.query(QUERY_TO_GET_CHUNKS, params={"filename":file_name})
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'retry_processing', 'db_url':uri, 'userName':userName, 'database':database, 'file_name':file_name,'retry_condition':retry_condition,
+                            'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}','email':email}
+        logger.log_struct(json_obj, "INFO")
+        if chunks[0]['text'] is None or chunks[0]['text']=="" or not chunks :
+            return create_api_response('Success',message=f"Chunks are not created for the file{file_name}. Please upload again the file to re-process.",data=chunks)
+        else:
+            await asyncio.to_thread(set_status_retry, graph,file_name,retry_condition)
+            return create_api_response('Success',message=f"Status set to Ready to Reprocess for filename : {file_name}")
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to set status to Retry"
+        error_message = str(e)
+        logging.exception(f'{error_message}')
+        return create_api_response(job_status, message=message, error=error_message)
+    finally:
+        gc.collect()    
+
+@app.post('/metric')
+async def calculate_metric(question: str = Form(),
+                           context: str = Form(),
+                           answer: str = Form(),
+                           model: str = Form(),
+                           mode: str = Form()):
+    try:
+        start = time.time()
+        context_list = [str(item).strip() for item in json.loads(context)] if context else []
+        answer_list = [str(item).strip() for item in json.loads(answer)] if answer else []
+        mode_list = [str(item).strip() for item in json.loads(mode)] if mode else []
+
+        result = await asyncio.to_thread(
+            get_ragas_metrics, question, context_list, answer_list, model
+        )
+        if result is None or "error" in result:
+            return create_api_response(
+                'Failed',
+                message='Failed to calculate evaluation metrics.',
+                error=result.get("error", "Ragas evaluation returned null")
+            )
+        data = {mode: {metric: result[metric][i] for metric in result} for i, mode in enumerate(mode_list)}
+        end = time.time()
+        elapsed_time = end - start
+        json_obj = {'api_name':'metric', 'question':question, 'context':context, 'answer':answer, 'model':model,'mode':mode,
+                            'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{elapsed_time:.2f}'}
+        logger.log_struct(json_obj, "INFO")
+        return create_api_response('Success', data=data)
+    except Exception as e:
+        logging.exception(f"Error while calculating evaluation metrics: {e}")
+        return create_api_response(
+            'Failed',
+            message="Error while calculating evaluation metrics",
+            error=str(e)
+        )
+    finally:
+        gc.collect()
+       
+@app.post('/additional_metrics')
+async def calculate_additional_metrics(question: str = Form(),
+                                        context: str = Form(),
+                                        answer: str = Form(),
+                                        reference: str = Form(),
+                                        model: str = Form(),
+                                        mode: str = Form(),
+):
+   try:
+       context_list = [str(item).strip() for item in json.loads(context)] if context else []
+       answer_list = [str(item).strip() for item in json.loads(answer)] if answer else []
+       mode_list = [str(item).strip() for item in json.loads(mode)] if mode else []
+       result = await get_additional_metrics(question, context_list,answer_list, reference, model)
+       if result is None or "error" in result:
+           return create_api_response(
+               'Failed',
+               message='Failed to calculate evaluation metrics.',
+               error=result.get("error", "Ragas evaluation returned null")
+           )
+       data = {mode: {metric: result[i][metric] for metric in result[i]} for i, mode in enumerate(mode_list)}
+       return create_api_response('Success', data=data)
+   except Exception as e:
+       logging.exception(f"Error while calculating evaluation metrics: {e}")
+       return create_api_response(
+           'Failed',
+           message="Error while calculating evaluation metrics",
+           error=str(e)
+       )
+   finally:
+       gc.collect()
+
+@app.post("/fetch_chunktext")
+async def fetch_chunktext(
+   uri: str = Form(),
+   database: str = Form(),
+   userName: str = Form(),
+   password: str = Form(),
+   document_name: str = Form(),
+   page_no: int = Form(1),
+   email=Form()
+):
+   try:
+       start = time.time()
+       result = await asyncio.to_thread(
+           get_chunktext_results,
+           uri=uri,
+           username=userName,
+           password=password,
+           database=database,
+           document_name=document_name,
+           page_no=page_no
+       )
+       end = time.time()
+       elapsed_time = end - start
+       json_obj = {
+           'api_name': 'fetch_chunktext',
+           'db_url': uri,
+           'userName': userName,
+           'database': database,
+           'document_name': document_name,
+           'page_no': page_no,
+           'logging_time': formatted_time(datetime.now(timezone.utc)),
+           'elapsed_api_time': f'{elapsed_time:.2f}',
+           'email': email
+       }
+       logger.log_struct(json_obj, "INFO")
+       return create_api_response('Success', data=result, message=f"Total elapsed API time {elapsed_time:.2f}")
+   except Exception as e:
+       job_status = "Failed"
+       message = "Unable to get chunk text response"
+       error_message = str(e)
+       logging.exception(f'Exception in fetch_chunktext: {error_message}')
+       return create_api_response(job_status, message=message, error=error_message)
+   finally:
+       gc.collect()
+
+@app.post("/backend_connection_configuration")
+async def backend_connection_configuration():
+    try:
+        start = time.time()
+        uri = os.getenv('NEO4J_URI')
+        username= os.getenv('NEO4J_USERNAME')
+        database= os.getenv('NEO4J_DATABASE')
+        password= os.getenv('NEO4J_PASSWORD')
+        gcs_file_cache = os.environ.get('GCS_FILE_CACHE')
+        chunk_to_be_created = int(os.environ.get('CHUNKS_TO_BE_CREATED', '50'))
+        if all([uri, username, database, password]):
+            graph = Neo4jGraph()
+            logging.info(f'login connection status of object: {graph}')
+            if graph is not None:
+                graph_connection = True        
+                encoded_password = encode_password(password)
+                graphDb_data_Access = graphDBdataAccess(graph)
+                result = graphDb_data_Access.connection_check_and_get_vector_dimensions(database)
+                result["graph_connection"] = graph_connection
+                result["uri"] = uri
+                result["user_name"] = username
+                result["database"] = database
+                result["password"] = encoded_password
+                result['gcs_file_cache'] = gcs_file_cache
+                result['chunk_to_be_created']= chunk_to_be_created
+                end = time.time()
+                elapsed_time = end - start
+                result['api_name'] = 'backend_connection_configuration'
+                result['elapsed_api_time'] = f'{elapsed_time:.2f}'
+                logger.log_struct(result, "INFO")
+                return create_api_response('Success',message=f"Backend connection successful",data=result)
+        else:
+            graph_connection = False
+            return create_api_response('Success',message=f"Backend connection is not successful",data=graph_connection)
+    except Exception as e:
+        graph_connection = False
+        job_status = "Failed"
+        message="Unable to connect backend DB"
+        error_message = str(e)
+        logging.exception(f'{error_message}')
+        return create_api_response(job_status, message=message, error=error_message.rstrip('.') + ', or fill from the login dialog.', data=graph_connection)
+    finally:
+        gc.collect()
 
 if __name__ == "__main__":
     uvicorn.run(app)
