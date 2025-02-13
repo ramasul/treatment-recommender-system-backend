@@ -85,6 +85,18 @@ async def get_graph_document_list(llm, combined_chunk_document_list, allowedNode
     graph_document_list = []
     if "diffbot_api_key" in dir(llm):
         llm_transformer = llm
+    else:
+        node_properties = ["description"]
+        relationship_properties = ["description"]
+        llm_transformer = LLMGraphTransformer(
+            llm=llm,
+            node_properties=node_properties,
+            relationship_properties=relationship_properties,
+            allowed_nodes=allowedNodes,
+            allowed_relationships=allowedRelationship,
+            ignore_tool_usage=True,
+            additional_instructions=ADDITIONAL_INSTRUCTIONS+ (additional_instructions if additional_instructions else "")
+        )
 
     if isinstance(llm,DiffbotGraphTransformer):
         graph_document_list = llm_transformer.convert_to_graph_documents(combined_chunk_document_list)
