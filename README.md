@@ -9,6 +9,8 @@ The Knowledge Graph used Leiden Algorithm for Community to enhance efficiency in
 
 The project is made for Industrial **Internship** Course in Department of Electrical Engineering and Information Technology (DEEIT)
 
+This API is based on Graph Builder by Neo4j at https://github.com/neo4j-labs/llm-graph-builder/
+
 ## Features
 - **Knowledge Graph Creation**: Transform unstructured data into structured knowledge graphs using LLMs.
 - **Providing Schema**: Provide your own custom schema or use existing schema in settings to generate graph.
