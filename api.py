@@ -48,6 +48,7 @@ from src.neighbours import get_neighbour_nodes
 from src.logger import CustomLogger
 from src.ragas_eval import *
 from src.entities.source_node import sourceNode
+from src.chat_interaction import *
 
 logger = CustomLogger()
 CHUNK_DIR = os.path.join(os.path.dirname(__file__), "chunks")
@@ -1048,6 +1049,63 @@ async def backend_connection_configuration():
         error_message = str(e)
         logging.exception(f'{error_message}')
         return create_api_response(job_status, message=message, error=error_message.rstrip('.') + ', or fill from the login dialog.', data=graph_connection)
+    finally:
+        gc.collect()
+
+# @app.post("/chat_bot/interraction")
+# async def chat_bot_interraction(uri=Form(),model=Form(None),userName=Form(), password=Form(), database=Form(),question=Form(None), document_names=Form(None),session_id=Form(None),mode=Form(None),email=Form()):
+#     logging.info(f"QA_RAG called at {datetime.now()}")
+#     qa_rag_start_time = time.time()
+#     try:
+#         if mode == "graph":
+#             graph = Neo4jGraph( url=uri,username=userName,password=password,database=database,sanitize = True, refresh_schema=True)
+#         else:
+#             graph = create_graph_database_connection(uri, userName, password, database)
+        
+#         graph_DB_dataAccess = graphDBdataAccess(graph)
+#         write_access = graph_DB_dataAccess.check_account_access(database=database)
+#         result = await asyncio.to_thread(QA_RAG,graph=graph,model=model,question=question,document_names=document_names,session_id=session_id,mode=mode,write_access=write_access)
+
+#         total_call_time = time.time() - qa_rag_start_time
+#         logging.info(f"Total Response time is  {total_call_time:.2f} seconds")
+#         result["info"]["response_time"] = round(total_call_time, 2)
+        
+#         json_obj = {'api_name':'chat_bot','db_url':uri, 'userName':userName, 'database':database, 'question':question,'document_names':document_names,
+#                              'session_id':session_id, 'mode':mode, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{total_call_time:.2f}','email':email}
+#         logger.log_struct(json_obj, "INFO")
+        
+#         return create_api_response('Success',data=result)
+#     except Exception as e:
+#         job_status = "Failed"
+#         message="Unable to get chat response"
+#         error_message = str(e)
+#         logging.exception(f'Exception in chat bot:{error_message}')
+#         return create_api_response(job_status, message=message, error=error_message,data=mode)
+#     finally:
+#         gc.collect()
+
+@app.post("/init_chat")
+async def initialize_chat(session_id=Form(None), context=Form(None)):
+    logging.info(f"Initialize_chat called at {datetime.now()}")
+    init_chat_start_time = time.time()
+    try:
+        context = json.loads(context) if context else None
+        result = await asyncio.to_thread(initial_greeting,session_id=session_id,context=context)
+
+        total_call_time = time.time() - init_chat_start_time
+        logging.info(f"Total Response time is  {total_call_time:.2f} seconds")
+        result["info"]["response_time"] = round(total_call_time, 2)
+        
+        json_obj = {'api_name':'init_chat','session_id':session_id, 'Context':context, 'logging_time': formatted_time(datetime.now(timezone.utc)), 'elapsed_api_time':f'{total_call_time:.2f}'}
+        logger.log_struct(json_obj, "INFO")
+        
+        return create_api_response('Success',data=result)
+    except Exception as e:
+        job_status = "Failed"
+        message="Unable to get chat response"
+        error_message = str(e)
+        logging.exception(f'Exception in chat bot:{error_message}')
+        return create_api_response(job_status, message=message, error=error_message,data=session_id)
     finally:
         gc.collect()
 

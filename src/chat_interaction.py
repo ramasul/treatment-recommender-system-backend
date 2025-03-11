@@ -51,19 +51,23 @@ def chat_interaction(
         if diagnosis:
             system_prompt = (
                 f"{context_str}"
-                f"Anda adalah seorang dokter yang memberikan informasi tentang penyakit {disease_context} kepada pasien penderita penyakit tersebut. "
+                f"Anda adalah seorang dokter yang memberikan informasi kepada pasien penderita penyakit. "
                 "Berikan penjelasan berdasarkan konteks yang ada dan pengetahuan medis Anda."
                 "Jelaskan dengan bahasa yang mudah dipahami."
-                "Tidak perlu memperkenalkan diri Anda"
+                "Jangan lakukan penanganan, hanya berikan informasi."
+                "Tidak perlu memperkenalkan diri Anda."
+                "Jawab dalam maksimum 2 kalimat."
+                "Jawab dalam bahasa Indonesia."
+                f"Penyakit pasien: {disease_context}"
             )
         else:
             system_prompt = (
-                f"{context_str}"
-                "Anda adalah seorang dokter yang sedang melakukan konsultasi. "
-                "Tanyakan gejala-gejala yang dirasakan pasien secara bertahap. "
-                "Berikan respon dan analisis untuk setiap jawaban pasien. "
-                "Fokus pada pengumpulan informasi yang relevan untuk diagnosis. "
-                "Selalu tanyakan apakah pasien memiliki gejala lain di kalimat terakhir."
+                f"Ada seorang pasien dengan, {context_str}"
+                "Anda adalah seorang dokter yang sedang memberikan konsultasi."
+                "Selalu tanyakan gejala lain yang dirasakan pasien."
+                "Fokus pada pengumpulan informasi yang relevan untuk diagnosis."
+                "Jangan sebut nama penyakit apapun."
+                "Jawab dalam kurang dari 14 kata."
             )
 
         if not messages:
@@ -192,7 +196,6 @@ def check_if_chat_is_symptoms(human_messages: str, model: str) -> bool:
             result = response.content.lower().strip()
             
         elif model.lower() == 'diffbot':
-            # For Diffbot API
             prompt = f"{system_prompt}\n\n{user_prompt}"
             response = llm.complete(
                 prompt=prompt,
@@ -211,4 +214,4 @@ def check_if_chat_is_symptoms(human_messages: str, model: str) -> bool:
         logging.error(f"Error in chat_interaction: {str(e)}")
         raise Exception(f"Failed to process chat interaction: {str(e)}")
 
-print(chat_interaction("groq_llama3_70b", "Itu aja sih dok. Saya sakit apa ya?", "1", {"name": "Budi", "age": 30, "weight": 70, "height": 170, "description": "Ada riwayat diabetes"}, True, "Pasien kemungkinan menderita diabetes. Diabetes adalah penyakit yang disebabkan oleh kadar gula darah yang tinggi. Obatnya dengan minum air putih dan kurangi gula."))
+# print(chat_interaction("groq_llama3_70b", "Akhir-akhir ini saya ngerasa kepala sering nggeliyeng kepala serasa muter muter gitu dok.", "1", {"name": "Budi", "age": 30, "weight": 70, "height": 170, "description": "Ada riwayat diabetes"}, False, None))

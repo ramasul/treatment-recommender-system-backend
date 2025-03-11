@@ -196,7 +196,7 @@ def get_gds_driver(uri, username, password, database):
         logging.info("Successfully created GDS driver.")
         return gds
     except Exception as e:
-        err: f"Failed to create GDS driver with error {e}"
+        err = f"Failed to create GDS driver with error {e}"
         logging.error(err)
         raise Exception(err)
 
