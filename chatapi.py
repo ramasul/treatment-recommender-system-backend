@@ -226,8 +226,8 @@ async def chat_bot(
 
 
 @app.post("/check-symptoms")
-def check_symptoms(human_messages=Form(), model= Form()):
-    result = check_if_chat_is_symptoms(human_messages, model)
+def check_symptoms(human_messages=Form(), model= Form(), session_id=Form()):
+    result = check_if_chat_is_symptoms(human_messages, model, session_id)
     return {"is_symptoms": result}
 
 

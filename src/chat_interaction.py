@@ -50,9 +50,10 @@ def chat_interaction(
 
         if diagnosis:
             system_prompt = (
-                f"{context_str}"
                 f"Anda adalah seorang dokter yang memberikan informasi kepada pasien penderita penyakit. "
-                "Berikan penjelasan berdasarkan konteks yang ada dan pengetahuan medis Anda."
+                f"{context_str}"
+                "Berikan penjelasan berdasarkan konteks penyakit pasien yang ada."
+                "Apabila tidak ada konteks yang relevan, berikan informasi umum dan jangan membuat informasi baru."
                 "Jelaskan dengan bahasa yang mudah dipahami."
                 "Jangan lakukan penanganan, hanya berikan informasi."
                 "Tidak perlu memperkenalkan diri Anda."
@@ -76,18 +77,44 @@ def chat_interaction(
         chat_history.add_message(HumanMessage(content=human_messages))
 
         if not diagnosis:
+            # Get previous AI message if it exists
+            previous_ai_message = None
+            if len(messages) >= 2 and isinstance(messages[-1], HumanMessage) and isinstance(messages[-2], AIMessage):
+                previous_ai_message = messages[-2].content
+            
             extraction_prompt = (
-                "Analisis pesan pasien berikut dan ekstrak apabila terdapat keluhan medis atau gejala dalam format JSON:\n"
-                "Contohnya:\n"
+                "Analisis pesan pasien berikut dan ekstrak apabila terdapat keluhan medis atau gejala dalam format JSON.\n"
+                
+                # Add context from previous AI message if available
+                f"{'Pertanyaan sebelumnya dari dokter: ' + previous_ai_message if previous_ai_message else ''}\n\n"
+                
+                "Berikan hasil dalam format JSON:\n"
                 "{\n"
                 '  "gejala": ["pusing", "batuk", "lemas"]\n'
                 "}\n\n"
-                "Apabila tidak ada gejala, isi dengan JSON { \"gejala\": []}\n\n"
-                "Hanya jawab dengan format JSON."
+
+                "Contoh:\n"
+                "Pertanyaan: 'Apakah Anda merasa pusing atau mual?'\n"
+                "Pesan Pasien: 'Engga, tetapi saya kesulitan ereksi'\n"
+                "Jawaban: { \"gejala\": [\"kesulitan ereksi\"]}\n\n"
+
+                "Contoh:\n"
+                "Pertanyaan: 'Apakah Anda merasa pusing atau mual?'\n"
+                "Pesan Pasien: 'Iya'\n"
+                "Jawaban: { \"gejala\": [\"pusing\", \"mual\"]}\n\n"
+                
+                "Catatan penting:\n"
+                "- Jika pasien menjawab 'ya', 'iya', 'ada', 'betul', dll. terhadap pertanyaan tentang gejala tertentu, ekstrak gejala tersebut\n"
+                "- Gunakan konteks dari pertanyaan sebelumnya untuk memahami jawaban pasien yang singkat\n"
+                "- Apabila tidak ada gejala, isi dengan { \"gejala\": []}\n\n"
+                
+                "Hanya jawab dengan format JSON.\n"
                 f"Pesan pasien: {human_messages}"
             )
+            
             symptom_response = llm.invoke([HumanMessage(content=extraction_prompt)])
             print(symptom_response)
+            
             if isinstance(symptom_response, AIMessage):
                 extracted_symptoms = symptom_response.content.strip()
             else:
@@ -159,7 +186,7 @@ def initial_greeting(session_id: str, context: Optional[Dict] = None) -> Dict[st
         "user": "chatbot"
     }
 
-def check_if_chat_is_symptoms(human_messages: str, model: str) -> bool:
+def check_if_chat_is_symptoms(human_messages: str, model: str, session_id: str) -> bool:
     """
     [ENG]: Check if the chat message contains symptoms extraction request.
     [IDN]: Periksa apakah pesan obrolan berisi permintaan ekstraksi gejala.
@@ -173,45 +200,71 @@ def check_if_chat_is_symptoms(human_messages: str, model: str) -> bool:
     """
     try:
         llm, model_name = get_llm(model)
+        
+        # Get chat history using session_id
+        chat_history = get_history_by_session_id(session_id)
+        messages = chat_history.messages
+        
+        # Get previous AI message if it exists
+        previous_ai_message = None
+        if len(messages) >= 1 and isinstance(messages[-1], HumanMessage):
+            # Find the most recent AI message before the current human message
+            for i in range(len(messages)-2, -1, -1):
+                if isinstance(messages[i], AIMessage):
+                    previous_ai_message = messages[i].content
+                    break
+        
         system_prompt = (
             "Anda adalah seorang dokter yang ahli dalam mendeteksi apakah seseorang sedang "
             "membicarakan tentang gejala penyakit atau kondisi kesehatan mereka. "
             "Tugas Anda adalah menentukan apakah pesan yang diberikan berisi informasi "
             "tentang gejala, keluhan kesehatan, atau pertanyaan medis.\n\n"
+            "PENTING: Jika dokter menanyakan tentang gejala dan pasien menjawab APAPUN yang "
+            "mengonfirmasi gejala tersebut (seperti 'ya', 'iya', 'betul', 'ada', dll.) "
+            "atau memberikan durasi/detail tentang gejala tersebut, maka ini "
+            "harus dianggap sebagai pembicaraan tentang gejala.\n\n"
             "Berikan jawaban 'true' jika pesan berisi informasi tentang gejala atau "
-            "keluhan kesehatan, dan 'false' jika tidak."
+            "keluhan kesehatan, atau jika pesan adalah respons terhadap pertanyaan dokter "
+            "tentang gejala. Jawab 'false' jika tidak terkait dengan gejala atau keluhan kesehatan."
         )
         
-        user_prompt = f"Pesan: {human_messages}\n\nApakah pesan di atas membicarakan tentang gejala atau keluhan kesehatan?"
+        # Include previous AI message for context if available
+        context = ""
+        if previous_ai_message:
+            context = f"Pertanyaan dokter sebelumnya: {previous_ai_message}\n\n"
         
-        if model.lower() == 'groq_llama3_70b':
+        user_prompt = (
+            f"{context}"
+            f"Pesan pasien: {human_messages}\n\n"
+            f"Berdasarkan percakapan di atas, apakah pasien sedang membicarakan atau "
+            f"merespons tentang gejala/keluhan kesehatan? Jawab hanya dengan 'true' atau 'false'."
+        )
+       
+        if model.lower() == 'groq_llama3_70b' or 'openai' in model.lower():
             from langchain_core.messages import SystemMessage, HumanMessage
-            
-            messages = [
+           
+            prompt_messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
-            
-            response = llm.invoke(messages)
+           
+            response = llm.invoke(prompt_messages)
             result = response.content.lower().strip()
-            
-        elif model.lower() == 'diffbot':
-            prompt = f"{system_prompt}\n\n{user_prompt}"
-            response = llm.complete(
-                prompt=prompt,
-                temperature=0,
-                max_tokens=10
-            )
-            result = response.lower().strip()
-        
         else:
             raise ValueError(f"Unsupported model: {model}")
+       
+        # More comprehensive check of positive responses
+        positive_indicators = ['true', 'ya', 'benar', 'iya', 'betul']
         
-        # Check if response indicates symptoms
-        return 'true' in result or 'ya' in result or 'benar' in result
+        # Log the result for debugging
+        logging.info(f"Symptom detection for '{human_messages}' with previous context '{previous_ai_message}': {result}")
         
+        # Check if any positive indicator is in the result
+        return any(indicator in result for indicator in positive_indicators)
+       
     except Exception as e:
-        logging.error(f"Error in chat_interaction: {str(e)}")
-        raise Exception(f"Failed to process chat interaction: {str(e)}")
+        logging.error(f"Error in check_if_chat_is_symptoms: {str(e)}")
+        # Default to True in case of error to be safe
+        return True
 
 # print(chat_interaction("groq_llama3_70b", "Akhir-akhir ini saya ngerasa kepala sering nggeliyeng kepala serasa muter muter gitu dok.", "1", {"name": "Budi", "age": 30, "weight": 70, "height": 170, "description": "Ada riwayat diabetes"}, False, None))

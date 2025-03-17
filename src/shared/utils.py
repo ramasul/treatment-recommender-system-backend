@@ -6,6 +6,7 @@ from typing import List
 from pathlib import Path
 from urllib.parse import urlparse
 from langchain_neo4j import Neo4jGraph
+from langchain_openai import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.graphs.graph_document import GraphDocument
 from src.document_sources.youtube import create_youtube_url
@@ -97,6 +98,10 @@ def load_embedding_model(embedding_model_name: str):
         )
         dimension = 384
         logging.info(f"Embedding: Using Langchain HuggingFaceEmbeddings , Dimension:{dimension}")
+    elif embedding_model_name == "openai":
+        embeddings = OpenAIEmbeddings()
+        dimension = 1536
+        logging.info(f"Embedding: Using OpenAI Embeddings , Dimension:{dimension}")
     else:
         err = f"Embedding model {embedding_model_name} is not supported"
         logging.error(err)

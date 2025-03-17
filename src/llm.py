@@ -1,6 +1,7 @@
 import os
 import logging
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain.docstore.document import Document
 from langchain_experimental.graph_transformers.diffbot import DiffbotGraphTransformer
 from langchain_experimental.graph_transformers import LLMGraphTransformer
@@ -31,6 +32,19 @@ def get_llm(model: str):
                 diffbot_api_key=api_key,
                 extract_types=["entities", "facts"],
             )
+        
+        elif "openai" in model:
+            model_name, api_key = env_value.split(",")
+            if "o3-mini" in model:
+                llm= ChatOpenAI(
+                api_key=api_key,
+                model=model_name)
+            else:
+                llm = ChatOpenAI(
+                api_key=api_key,
+                model=model_name,
+                temperature=0,
+                )
 
     except Exception as e:
         err = f"Error while creating LLM '{model}': {str(e)}"

@@ -24,6 +24,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 # LangChain chat models
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 # Local imports
 from src.llm import get_llm
@@ -67,7 +68,7 @@ def get_history_by_session_id(session_id):
 
 def get_total_tokens(ai_response, llm):
     try:
-        if isinstance(llm, (ChatGroq)):
+        if isinstance(llm, (ChatOpenAI, ChatGroq)):
             total_tokens = ai_response.response_metadata.get('token_usage', {}).get('total_tokens', 0)
         
         else:

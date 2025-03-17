@@ -1,4 +1,5 @@
 GROQ_MODELS = ["llama3-8b-8192"]
+OPENAI_MODELS = ["openai-gpt-3.5", "openai-gpt-4o", "openai-gpt-4o-mini"]
 GRAPH_CHUNK_LIMIT = 50 
 
 ADDITIONAL_INSTRUCTIONS = """Your goal is to identify and categorize entities while ensuring that specific data 
